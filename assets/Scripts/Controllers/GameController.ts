@@ -1,8 +1,7 @@
-import { _decorator, Component, Node, view, UITransform, Graphics, log } from 'cc';
+import { _decorator, Component, Node, view, UITransform, Graphics, Sprite, SpriteFrame, PhysicsSystem2D, Vec2, log } from 'cc';
 import { PathGenerator } from '../Core/Generation/PathGenerator';
 import { PathSegment } from '../Core/Generation/IPathConfig';
-import { ScrollSystem } from '../Core/Systems/ScrollSystem';
-import { PlaneSystem } from '../Core/Systems/PlaneSystem';
+import { PlaneController } from '../Core/Systems/PlaneController';
 import { InputSystem } from '../Core/Systems/InputSystem';
 import { GameState } from '../Core/Models/GameState';
 import { LevelRegistry } from '../Core/Levels/LevelRegistry';
@@ -12,23 +11,25 @@ import { PlaneView } from '../Views/Player/PlaneView';
 import { EventBus } from '../Managers/EventBus';
 import { GameEvent } from '../Utils/Constants';
 
-const { ccclass } = _decorator;
+const { ccclass, property } = _decorator;
 
 /**
  * Главный контроллер игровой сцены.
  * Связывает генерацию → скролл → отображение.
  *
  * Установка в редакторе:
- * 1. Создать пустую ноду под Canvas
- * 2. Добавить этот компонент
- * 3. Запустить — коридор генерируется и скроллится автоматически
+ * 1. Создать ноду Game под Canvas, добавить этот компонент
+ * 2. Назначить SpriteFrame самолёта в поле planeSpriteFrame
+ * 3. Запустить — коридор и самолёт создаются автоматически
  */
 @ccclass('GameController')
 export class GameController extends Component {
-    // --- Системы (чистая логика) ---
+    /** Спрайт самолёта — назначить PNG в редакторе */
+    @property(SpriteFrame)
+    planeSpriteFrame: SpriteFrame | null = null;
+    // --- Системы ---
     private pathGenerator: PathGenerator | null = null;
-    private scrollSystem: ScrollSystem | null = null;
-    private planeSystem: PlaneSystem | null = null;
+    private planeController: PlaneController | null = null;
     private gameState: GameState = GameState.instance;
 
     // --- Ввод ---
@@ -64,19 +65,12 @@ export class GameController extends Component {
         // Загружаем конфиг первого уровня
         this.levelConfig = LevelRegistry.getConfig(1);
 
+        // Настраиваем 2D-физику (Box2D)
+        this.initPhysics();
+
         // Инициализируем системы
         this.pathGenerator = new PathGenerator(
             this.levelConfig.path,
-            this.screenHeight
-        );
-        this.scrollSystem = new ScrollSystem(
-            this.levelConfig.scrollSpeed,
-            this.levelConfig.speedIncrement
-        );
-
-        // Физика корабля — определяет скорость скролла и вертикальное движение
-        this.planeSystem = new PlaneSystem(
-            this.levelConfig.plane,
             this.screenHeight
         );
 
@@ -85,7 +79,7 @@ export class GameController extends Component {
 
         // Создаём ноды для визуализации
         this.createCorridorView();
-        this.createPlaneView();
+        this.createPlaneNode();
 
         // Генерируем начальные сегменты
         this.generateInitialSegments();
@@ -97,16 +91,17 @@ export class GameController extends Component {
     update(dt: number): void {
         // Не обновляем если игра не запущена или на паузе
         if (!this.gameState.isRunning || this.gameState.isPaused) return;
-        if (!this.planeSystem || !this.inputSystem || !this.corridorView) return;
+        if (!this.planeController || !this.inputSystem || !this.corridorView) return;
 
-        // Читаем направление ввода и обновляем физику корабля
+        // Передаём ввод в физику корабля (Box2D применяет силы)
         const inputDir = this.inputSystem.getDirection();
-        const planeResult = this.planeSystem.update(inputDir, dt);
+        this.planeController.applyInput(inputDir);
 
-        // Скролл мира = горизонтальная скорость корабля
-        this.scrollOffset += planeResult.forwardDelta;
+        // Скролл мира = фиксированная горизонтальная скорость корабля
+        const forwardDelta = this.levelConfig!.plane.forwardSpeed * dt;
+        this.scrollOffset += forwardDelta;
         this.gameState.totalDistance = this.scrollOffset;
-        this.gameState.planeY = planeResult.newY;
+        this.gameState.planeY = this.planeController.getY();
         this.gameState.currentScrollSpeed = this.levelConfig!.plane.forwardSpeed;
 
         // Проверяем нужно ли генерировать новые сегменты
@@ -115,9 +110,8 @@ export class GameController extends Component {
         // Удаляем старые сегменты за пределами экрана (экономия памяти)
         this.pruneOldSegments();
 
-        // Обновляем визуал
+        // Обновляем визуал коридора (корабль обновляется автоматически через Box2D)
         this.corridorView.updateView(this.scrollOffset);
-        this.planeView?.updatePosition(planeResult.newY);
 
         // Транслируем событие скролла
         EventBus.emit(GameEvent.SCROLL_CHANGED, this.scrollOffset);
@@ -143,22 +137,47 @@ export class GameController extends Component {
     }
 
     /**
-     * Создаёт дочернюю ноду с PlaneView.
-     * Рисуется поверх коридора (добавляется после CorridorView).
+     * Настраивает 2D-физику (Box2D).
+     * Важно: в Project Settings → Physics должен быть выбран Box2D как 2D physics engine.
      */
-    private createPlaneView(): void {
-        const planeNode = new Node('PlaneView');
+    private initPhysics(): void {
+        // Включаем физику и задаём гравитацию мира
+        PhysicsSystem2D.instance.enable = true;
+        PhysicsSystem2D.instance.gravity = new Vec2(0, -600);
+    }
+
+    /**
+     * Создаёт ноду корабля с физикой (Box2D) и визуалом.
+     * Позиционируется на 20% от левого края, Y = 0.
+     * RigidBody2D управляет вертикальной позицией.
+     */
+    private createPlaneNode(): void {
+        if (!this.levelConfig) return;
+
+        const planeNode = new Node('Plane');
         this.node.addChild(planeNode);
 
-        // UITransform — для корректного рендера
-        const transform = planeNode.addComponent(UITransform);
-        transform.setContentSize(this.screenWidth, this.screenHeight);
+        // Позиция: 20% от левого края, Y = 0
+        const planeX = -this.screenWidth / 2 + this.screenWidth * 0.2;
+        planeNode.setPosition(planeX, 0);
 
-        // Graphics — для отрисовки круга
-        planeNode.addComponent(Graphics);
+        // UITransform — нужен для рендера и размера спрайта
+        planeNode.addComponent(UITransform);
 
-        // PlaneView — наш компонент визуализации корабля
+        // Sprite — для отображения PNG самолёта
+        const sprite = planeNode.addComponent(Sprite);
+        // Назначаем SpriteFrame из @property (если задан в редакторе)
+        if (this.planeSpriteFrame) {
+            sprite.spriteFrame = this.planeSpriteFrame;
+        }
+
+        // PlaneView — визуал (управляет размером спрайта)
         this.planeView = planeNode.addComponent(PlaneView);
+        this.planeView.setRadius(this.levelConfig.plane.colliderRadius);
+
+        // PlaneController — физика (RigidBody2D + CircleCollider2D)
+        this.planeController = planeNode.addComponent(PlaneController);
+        this.planeController.init(this.levelConfig.plane, this.screenHeight);
     }
 
     /**
