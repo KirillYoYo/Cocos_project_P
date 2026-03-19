@@ -1,4 +1,5 @@
 import { IPathConfig } from '../Generation/IPathConfig';
+import { IPlaneConfig } from '../Generation/IPlaneConfig';
 
 /**
  * Полный конфиг одного уровня.
@@ -26,16 +27,10 @@ export interface ILevelConfig {
     /** Параметры процедурной генерации коридора */
     path: IPathConfig;
 
-    // --- Скорость корабля ---
+    // --- Физика корабля ---
 
-    /** Базовая скорость движения корабля вверх/вниз (px/сек) */
-    planeBaseSpeed: number;
-
-    /** Максимальная скорость корабля после разгона */
-    planeMaxSpeed: number;
-
-    /** Ускорение при удержании ввода (px/сек²) */
-    planeAcceleration: number;
+    /** Параметры физики корабля (движение, инерция, скорость скролла) */
+    plane: IPlaneConfig;
 
     // --- Камера / Зум ---
 

@@ -2,10 +2,13 @@ import { _decorator, Component, Node, view, UITransform, Graphics, log } from 'c
 import { PathGenerator } from '../Core/Generation/PathGenerator';
 import { PathSegment } from '../Core/Generation/IPathConfig';
 import { ScrollSystem } from '../Core/Systems/ScrollSystem';
+import { PlaneSystem } from '../Core/Systems/PlaneSystem';
+import { InputSystem } from '../Core/Systems/InputSystem';
 import { GameState } from '../Core/Models/GameState';
 import { LevelRegistry } from '../Core/Levels/LevelRegistry';
 import { ILevelConfig } from '../Core/Levels/ILevelConfig';
 import { CorridorView } from '../Views/Environment/CorridorView';
+import { PlaneView } from '../Views/Player/PlaneView';
 import { EventBus } from '../Managers/EventBus';
 import { GameEvent } from '../Utils/Constants';
 
@@ -25,10 +28,15 @@ export class GameController extends Component {
     // --- Системы (чистая логика) ---
     private pathGenerator: PathGenerator | null = null;
     private scrollSystem: ScrollSystem | null = null;
+    private planeSystem: PlaneSystem | null = null;
     private gameState: GameState = GameState.instance;
+
+    // --- Ввод ---
+    private inputSystem: InputSystem | null = null;
 
     // --- View ---
     private corridorView: CorridorView | null = null;
+    private planeView: PlaneView | null = null;
 
     // --- Конфиг ---
     private levelConfig: ILevelConfig | null = null;
@@ -66,8 +74,18 @@ export class GameController extends Component {
             this.levelConfig.speedIncrement
         );
 
-        // Создаём ноду для CorridorView (программно)
+        // Физика корабля — определяет скорость скролла и вертикальное движение
+        this.planeSystem = new PlaneSystem(
+            this.levelConfig.plane,
+            this.screenHeight
+        );
+
+        // Ввод — Cocos-компонент, добавляем на эту же ноду
+        this.inputSystem = this.node.addComponent(InputSystem);
+
+        // Создаём ноды для визуализации
         this.createCorridorView();
+        this.createPlaneView();
 
         // Генерируем начальные сегменты
         this.generateInitialSegments();
@@ -79,13 +97,17 @@ export class GameController extends Component {
     update(dt: number): void {
         // Не обновляем если игра не запущена или на паузе
         if (!this.gameState.isRunning || this.gameState.isPaused) return;
-        if (!this.scrollSystem || !this.corridorView) return;
+        if (!this.planeSystem || !this.inputSystem || !this.corridorView) return;
 
-        // Обновляем скролл — получаем смещение за кадр
-        const scrollDelta = this.scrollSystem.update(dt);
-        this.scrollOffset += scrollDelta;
+        // Читаем направление ввода и обновляем физику корабля
+        const inputDir = this.inputSystem.getDirection();
+        const planeResult = this.planeSystem.update(inputDir, dt);
+
+        // Скролл мира = горизонтальная скорость корабля
+        this.scrollOffset += planeResult.forwardDelta;
         this.gameState.totalDistance = this.scrollOffset;
-        this.gameState.currentScrollSpeed = this.scrollSystem.getSpeed();
+        this.gameState.planeY = planeResult.newY;
+        this.gameState.currentScrollSpeed = this.levelConfig!.plane.forwardSpeed;
 
         // Проверяем нужно ли генерировать новые сегменты
         this.checkAndGenerateMore();
@@ -95,6 +117,7 @@ export class GameController extends Component {
 
         // Обновляем визуал
         this.corridorView.updateView(this.scrollOffset);
+        this.planeView?.updatePosition(planeResult.newY);
 
         // Транслируем событие скролла
         EventBus.emit(GameEvent.SCROLL_CHANGED, this.scrollOffset);
@@ -117,6 +140,25 @@ export class GameController extends Component {
 
         // CorridorView — наш компонент визуализации
         this.corridorView = corridorNode.addComponent(CorridorView);
+    }
+
+    /**
+     * Создаёт дочернюю ноду с PlaneView.
+     * Рисуется поверх коридора (добавляется после CorridorView).
+     */
+    private createPlaneView(): void {
+        const planeNode = new Node('PlaneView');
+        this.node.addChild(planeNode);
+
+        // UITransform — для корректного рендера
+        const transform = planeNode.addComponent(UITransform);
+        transform.setContentSize(this.screenWidth, this.screenHeight);
+
+        // Graphics — для отрисовки круга
+        planeNode.addComponent(Graphics);
+
+        // PlaneView — наш компонент визуализации корабля
+        this.planeView = planeNode.addComponent(PlaneView);
     }
 
     /**

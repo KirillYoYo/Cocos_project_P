@@ -37,6 +37,9 @@ export class GameState {
     /** Текущая скорость горизонтального скролла (px/сек) */
     currentScrollSpeed: number = 0;
 
+    /** Текущая Y-позиция корабля (px) */
+    planeY: number = 0;
+
     /** Номер текущего уровня */
     currentLevel: number = 1;
 
@@ -48,5 +51,6 @@ export class GameState {
         this.isPaused = false;
         this.totalDistance = 0;
         this.currentScrollSpeed = 0;
+        this.planeY = 0;
     }
 }

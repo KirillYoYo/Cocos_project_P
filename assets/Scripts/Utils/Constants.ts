@@ -15,6 +15,7 @@ export enum GameEvent {
     BOOST_START = 'boost-start',
     BOOST_END = 'boost-end',
     PLAYER_HIT = 'player-hit',
+    PLANE_INPUT = 'plane-input',
 }
 
 /** Цвета стен коридора (RGBA) */

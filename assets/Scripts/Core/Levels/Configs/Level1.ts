@@ -7,9 +7,9 @@ import { ILevelConfig } from '../ILevelConfig';
 export const LEVEL_1: ILevelConfig = {
     levelNumber: 1,
 
-    // Скорость скролла
-    scrollSpeed: 150,           // px/сек — неспешный старт
-    speedIncrement: 2,          // +2 px/сек каждую секунду
+    // Скролл отключён — мир движется со скоростью корабля
+    scrollSpeed: 0,
+    speedIncrement: 0,
 
     // Препятствия (пока заглушка, будут добавлены позже)
     obstacleTypes: ['rock', 'cloud'],
@@ -36,10 +36,15 @@ export const LEVEL_1: ILevelConfig = {
         ],
     },
 
-    // Корабль (будет использоваться позже)
-    planeBaseSpeed: 300,
-    planeMaxSpeed: 500,
-    planeAcceleration: 400,
+    // Физика корабля
+    plane: {
+        forwardSpeed: 150,       // горизонтальная скорость = скорость скролла мира
+        upAcceleration: 400,     // подъём — медленный, тяжёлый
+        downAcceleration: 900,   // пикирование — быстрое, резкое
+        maxUpSpeed: 250,         // лимит скорости вверх
+        maxDownSpeed: 500,       // лимит скорости вниз (выше чем вверх)
+        inertiaDamping: 0.85,    // скорость затухает умеренно (~85% потери в секунду)
+    },
 
     // Камера (будет использоваться позже)
     cameraZoomDefault: 1.0,
