@@ -24,6 +24,16 @@ export const LEVEL_1: ILevelConfig = {
         corridorShrinkRate: 0.002, // медленное сужение
         segmentLength: 20,      // шаг дискретизации кривой
         prebuildSegments: 100,  // 100 × 20 = 2000px вперёд
+
+        // Скачки
+        sharpJumps: [
+            { atX: 1000, offsetY: -150, transitionLength: 60 },
+            { atX: 2000, offsetY: 150, transitionLength: 120 },
+            { atX: 2500, offsetY: -150, transitionLength: 220 },
+            { atX: 2800, offsetY: 150, transitionLength: 220 },
+            { atX: 3500, offsetY: -150, transitionLength: 720 },
+            { atX: 4500, offsetY: 150, transitionLength: 520 },
+        ],
     },
 
     // Корабль (будет использоваться позже)

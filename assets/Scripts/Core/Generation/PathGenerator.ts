@@ -1,5 +1,5 @@
 import { PerlinNoise } from './PerlinNoise';
-import { IPathConfig, PathSegment } from './IPathConfig';
+import { IPathConfig, IPathJump, PathSegment } from './IPathConfig';
 import { MathUtils } from '../../Utils/MathUtils';
 
 /**
@@ -39,7 +39,10 @@ export class PathGenerator {
 
             // Perlin noise возвращает ~[-1, 1], масштабируем амплитудой
             const noiseVal = this.noise.noise1D(x * cfg.noiseFrequency);
-            const rawCenterY = noiseVal * cfg.noiseAmplitude;
+
+            // Суммируем базовый Perlin noise со смещением от резких скачков
+            const jumpOffset = this.calculateJumpOffset(x);
+            const rawCenterY = noiseVal * cfg.noiseAmplitude + jumpOffset;
 
             // Ширина коридора сужается с прогрессом
             const shrink = totalDistance * cfg.corridorShrinkRate;
@@ -54,5 +57,28 @@ export class PathGenerator {
         }
 
         return segments;
+    }
+
+    /**
+     * Вычисляет суммарное смещение от всех резких скачков, активных для данной X-позиции.
+     * Каждый скачок линейно интерполируется от 0 до offsetY на протяжении transitionLength.
+     * После завершения перехода смещение сохраняется на всю оставшуюся длину пути.
+     */
+    private calculateJumpOffset(x: number): number {
+        const jumps: IPathJump[] = this.config.sharpJumps ?? [];
+        let totalOffset = 0;
+
+        for (const jump of jumps) {
+            // Если ещё не дошли до точки скачка — пропускаем
+            if (x < jump.atX) continue;
+
+            // Прогресс перехода: 0 → 1 на протяжении transitionLength px
+            const progress = Math.min(1, (x - jump.atX) / jump.transitionLength);
+
+            // Накапливаем смещение (скачки кумулятивны)
+            totalOffset += jump.offsetY * progress;
+        }
+
+        return totalOffset;
     }
 }
