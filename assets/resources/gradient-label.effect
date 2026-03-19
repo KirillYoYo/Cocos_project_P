@@ -1,0 +1,78 @@
+﻿CCEffect %{
+  techniques:
+  - passes:
+    - vert: sprite-vs:vert
+      frag: gradient-fs:frag
+      properties:
+        color1: { value: [1.0, 0.3, 0.0, 1.0], editor: { type: color } }     # Оранжевый
+        color2: { value: [0.0, 0.5, 1.0, 1.0], editor: { type: color } }     # Синий
+        color3: { value: [1.0, 0.0, 1.0, 1.0], editor: { type: color } }     # Фиолетовый
+        gradientType: { value: 0, editor: { type: "int", min: 0, max: 2 } }  # 0=линейный, 1=радиальный, 2=по Y
+}%
+
+CCProgram sprite-vs %{
+  precision highp float;
+  #include <cc-global>
+  
+  in vec3 a_position;
+  in vec2 a_texCoord;
+  in vec4 a_color;
+  
+  out vec2 v_texCoord;
+  out vec4 v_color;
+  
+  vec4 vert () {
+    v_texCoord = a_texCoord;
+    v_color = a_color;
+    return cc_matViewProj * vec4(a_position, 1.0);
+  }
+}%
+
+CCProgram gradient-fs %{
+  precision highp float;
+  
+  in vec2 v_texCoord;
+  in vec4 v_color;
+  
+  uniform sampler2D cc_spriteTexture;
+  
+  uniform GradientColors {
+    vec4 color1;
+    vec4 color2;
+    vec4 color3;
+    float gradientType;
+  };
+  
+  vec4 frag () {
+    // Берем альфу из текстуры BitmapFont
+    float alpha = texture(cc_spriteTexture, v_texCoord).a;
+    if (alpha < 0.01) discard;
+    
+    // Нормализованные UV для градиента
+    vec2 uv = v_texCoord * 2.0 - 1.0;
+    
+    float t;
+    if (gradientType == 0.0) {
+      // Линейный градиент (угол 45°)
+      t = dot(uv, vec2(0.707, 0.707));
+    } else if (gradientType == 1.0) {
+      // Радиальный градиент от центра
+      t = length(uv) * 0.5;
+    } else {
+      // Вертикальный градиент
+      t = uv.y * 0.5 + 0.5;
+    }
+    
+    // 3 цвета градиент
+    vec3 col;
+    if (t < 0.33) {
+      col = mix(color1.rgb, color2.rgb, t * 3.0);
+    } else if (t < 0.66) {
+      col = mix(color2.rgb, color3.rgb, (t - 0.33) * 3.0);
+    } else {
+      col = mix(color3.rgb, color1.rgb, (t - 0.66) * 3.0);
+    }
+    
+    return vec4(col, alpha);
+  }
+}%
