@@ -1,4 +1,8 @@
-import { _decorator, Component, Node, view, UITransform, Graphics, Sprite, SpriteFrame, PhysicsSystem2D, Vec2, log } from 'cc';
+import {
+    _decorator, Component, Node, view, UITransform, Graphics,
+    Sprite, SpriteFrame, PhysicsSystem2D, ParticleSystem2D,
+    Vec2, Color, Texture2D, ImageAsset, log
+} from 'cc';
 import { PathGenerator } from '../Core/Generation/PathGenerator';
 import { PathSegment } from '../Core/Generation/IPathConfig';
 import { PlaneController } from '../Core/Systems/PlaneController';
@@ -178,6 +182,101 @@ export class GameController extends Component {
         // PlaneController — физика (RigidBody2D + CircleCollider2D)
         this.planeController = planeNode.addComponent(PlaneController);
         this.planeController.init(this.levelConfig.plane, this.screenHeight);
+
+        // --- Выхлоп двигателя (частицы) ---
+        this.createEngineExhaust(planeNode);
+    }
+
+    /**
+     * Создаёт дочернюю ноду с ParticleSystem2D — выхлоп двигателя.
+     * Частицы летят назад (влево) от кормы корабля.
+     */
+    private createEngineExhaust(planeNode: Node): void {
+        if (!this.levelConfig) return;
+
+        const exhaustNode = new Node('EngineExhaust');
+        planeNode.addChild(exhaustNode);
+
+        // Позиция: за кормой корабля (левее центра на радиус)
+        const offsetX = -this.levelConfig.plane.colliderRadius;
+        exhaustNode.setPosition(0, offsetX * 2 + 15);
+
+        const ps = exhaustNode.addComponent(ParticleSystem2D);
+
+        // custom = true → игнорируем .plist, настраиваем вручную
+        ps.custom = true;
+
+        // Текстура частиц — белый квадрат 4x4, создаём программно
+        ps.spriteFrame = this.createWhiteSpriteFrame();
+
+        // Общие параметры
+        ps.totalParticles = 50;       // макс. частиц одновременно
+        ps.duration = -1;             // бесконечная эмиссия
+        ps.emissionRate = 30;         // частиц в секунду
+        ps.life = 1;                // время жизни частицы (сек)
+        ps.lifeVar = 1;            // разброс времени жизни
+
+        // Размер: начинают крупнее, затухают
+        ps.startSize = 10;
+        ps.startSizeVar = 5;
+        ps.endSize = 2;
+        ps.endSizeVar = 1;
+
+        ps.angle = -90;
+        ps.angleVar = 12;
+
+        // Скорость частиц (начальная, затем гасится gravity)
+        ps.speed = 100;
+        ps.speedVar = 20;
+
+        // Цвет: ярко-оранжевый → красный прозрачный
+        ps.startColor = new Color(255, 160, 50, 220);
+        ps.startColorVar = new Color(20, 30, 10, 0);
+        ps.endColor = new Color(255, 60, 10, 0);
+        ps.endColorVar = new Color(10, 10, 5, 0);
+
+        // Разброс позиции эмиттера (немного по Y)
+        ps.posVar = new Vec2(0, 3);
+
+        // Гравитационный режим (0 = Gravity, 1 = Radius)
+        ps.emitterMode = 0;
+        // Гравитация вверх тормозит частицы летящие вниз → они замирают
+        ps.gravity = new Vec2(0, 0);
+
+        // Запускаем эмиссию
+        ps.resetSystem();
+    }
+
+    /**
+     * Создаёт белый SpriteFrame 4x4 программно.
+     * Используется как текстура частиц — окрашивается через startColor/endColor.
+     */
+    private createWhiteSpriteFrame(): SpriteFrame {
+        // Создаём белый пиксельный буфер 4x4 (RGBA)
+        const size = 4;
+        const pixels = new Uint8Array(size * size * 4);
+        for (let i = 0; i < pixels.length; i++) {
+            pixels[i] = 255; // белый, полностью непрозрачный
+        }
+
+        // ImageAsset из сырых пикселей
+        const imageAsset = new ImageAsset();
+        imageAsset.reset({
+            _data: pixels,
+            _compressed: false,
+            width: size,
+            height: size,
+            format: Texture2D.PixelFormat.RGBA8888,
+        });
+
+        // Texture2D из ImageAsset
+        const texture = new Texture2D();
+        texture.image = imageAsset;
+
+        // SpriteFrame из текстуры
+        const sf = new SpriteFrame();
+        sf.texture = texture;
+        return sf;
     }
 
     /**
