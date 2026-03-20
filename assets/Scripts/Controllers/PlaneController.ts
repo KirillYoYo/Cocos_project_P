@@ -37,6 +37,15 @@ export class PlaneController extends Component {
     /** Половина высоты экрана (для ограничения по Y) */
     private halfScreenHeight: number = 0;
 
+    /** Половина ширины экрана (для ограничения по X) */
+    private halfScreenWidth: number = 0;
+
+    /** Начальная X-позиция корабля */
+    private initialX: number = 0;
+
+    /** Флаг столкновения с препятствиями */
+    private isColliding: boolean = false;
+
     /** Временный Vec3 для позиции (избегаем аллокаций) */
     private tempPos: Vec3 = new Vec3();
 
@@ -45,11 +54,14 @@ export class PlaneController extends Component {
      * Вызывается из GameController после добавления компонента.
      * Настраивает RigidBody2D и CircleCollider2D.
      */
-    init(config: IPlaneConfig, screenHeight: number): void {
+    init(config: IPlaneConfig, screenHeight: number, screenWidth: number): void {
         this.config = config;
         // Сохраняем половину высоты экрана для ограничения позиции
         this.halfScreenHeight = screenHeight / 2;
-
+        // Сохраняем половину ширины экрана для ограничения позиции
+        this.halfScreenWidth = screenWidth / 2;
+        // Сохраняем начальную X-позицию
+        this.initialX = this.node.position.x;
         // --- RigidBody2D ---
         this.rb = this.getComponent(RigidBody2D);
         if (!this.rb) {
@@ -135,6 +147,7 @@ export class PlaneController extends Component {
 
     /**
      * Ограничивает Y-позицию корабля в пределах экрана.
+     * X-позиция фиксирована на начальной.
      * Учитывает радиус коллайдера — корабль не выходит за край даже частично.
      * При касании границы обнуляет вертикальную скорость.
      */
@@ -147,21 +160,26 @@ export class PlaneController extends Component {
         const maxY = this.halfScreenHeight - radius;
         const minY = -this.halfScreenHeight + radius;
 
+        // Фиксируем X на начальной позиции
+        let clampedY = pos.y;
+
         if (pos.y > maxY) {
             // Корабль упёрся в потолок — прижимаем и гасим скорость вверх
-            this.tempPos.set(pos.x, maxY, pos.z);
-            this.node.setPosition(this.tempPos);
+            clampedY = maxY;
             const vel = this.rb.linearVelocity;
             if (vel.y > 0) vel.y = 0;
             this.rb.linearVelocity = vel;
         } else if (pos.y < minY) {
             // Корабль упёрся в пол — прижимаем и гасим скорость вниз
-            this.tempPos.set(pos.x, minY, pos.z);
-            this.node.setPosition(this.tempPos);
+            clampedY = minY;
             const vel = this.rb.linearVelocity;
             if (vel.y < 0) vel.y = 0;
             this.rb.linearVelocity = vel;
         }
+
+        // Устанавливаем позицию (X фиксирован, Y clamped)
+        this.tempPos.set(this.initialX, clampedY, pos.z);
+        this.node.setPosition(this.tempPos);
     }
 
     /** Текущая Y-позиция корабля */
@@ -172,6 +190,11 @@ export class PlaneController extends Component {
     /** Текущая вертикальная скорость (px/сек) */
     getVelocityY(): number {
         return this.rb ? this.rb.linearVelocity.y : 0;
+    }
+
+    /** Проверяет, сталкивается ли корабль с препятствиями */
+    isCollidingWithObstacles(): boolean {
+        return this.isColliding;
     }
 
     // --- Contact Callbacks ---
@@ -185,8 +208,11 @@ export class PlaneController extends Component {
         otherCollider: Collider2D,
         contact: IPhysics2DContact | null
     ): void {
+        // Устанавливаем флаг столкновения
+        this.isColliding = true;
+
         // Уведомляем систему о столкновении
-        EventBus.emit(GameEvent.PLAYER_HIT, otherCollider, contact);
+        EventBus.emit(GameEvent.PLAYER_HIT, { collider: otherCollider, contact: contact, power: 1 });
     }
 
     /**
@@ -198,7 +224,8 @@ export class PlaneController extends Component {
         otherCollider: Collider2D,
         contact: IPhysics2DContact | null
     ): void {
-        // Заготовка: можно использовать для снятия эффектов
+        // Сбрасываем флаг столкновения
+        this.isColliding = false;
     }
 
     /** Сброс физики к начальному состоянию */

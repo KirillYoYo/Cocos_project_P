@@ -103,8 +103,10 @@ export class GameController extends Component {
 
         // Скролл мира = фиксированная горизонтальная скорость корабля
         const forwardDelta = this.levelConfig!.plane.forwardSpeed * dt;
-        this.scrollOffset += forwardDelta;
-        this.gameState.totalDistance = this.scrollOffset;
+        if (!this.planeController.isCollidingWithObstacles()) {
+            this.scrollOffset += forwardDelta;
+            this.gameState.totalDistance = this.scrollOffset;
+        }
         this.gameState.planeY = this.planeController.getY();
         this.gameState.currentScrollSpeed = this.levelConfig!.plane.forwardSpeed;
 
@@ -181,7 +183,7 @@ export class GameController extends Component {
 
         // PlaneController — физика (RigidBody2D + CircleCollider2D)
         this.planeController = planeNode.addComponent(PlaneController);
-        this.planeController.init(this.levelConfig.plane, this.screenHeight);
+        this.planeController.init(this.levelConfig.plane, this.screenHeight, this.screenWidth);
 
         // --- Выхлоп двигателя (частицы) ---
         this.createEngineExhaust(planeNode);

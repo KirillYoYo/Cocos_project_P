@@ -1,4 +1,4 @@
-import { _decorator, Component, Graphics, Color, UITransform, view } from 'cc';
+import { _decorator, Component, Graphics, Color, UITransform, view, PolygonCollider2D, Vec2, RigidBody2D, ERigidBody2DType } from 'cc';
 import { PathSegment } from '../../Core/Generation/IPathConfig';
 import { WALL_COLOR, DEBUG_PATH_COLOR, OFFSCREEN_BUFFER } from '../../Utils/Constants';
 
@@ -13,6 +13,13 @@ const { ccclass } = _decorator;
 export class CorridorView extends Component {
     /** Graphics компонент для рисования полигонов стен */
     private graphics: Graphics | null = null;
+
+    /** RigidBody2D для статических коллайдеров стен */
+    private rb: RigidBody2D | null = null;
+
+    /** Коллайдеры для верхней и нижней стен */
+    private topCollider: PolygonCollider2D | null = null;
+    private bottomCollider: PolygonCollider2D | null = null;
 
     /** Текущие сегменты пути (устанавливаются GameController-ом) */
     private segments: PathSegment[] = [];
@@ -37,6 +44,17 @@ export class CorridorView extends Component {
         if (!this.graphics) {
             this.graphics = this.node.addComponent(Graphics);
         }
+
+        // Создаём RigidBody2D для статических коллайдеров
+        this.rb = this.getComponent(RigidBody2D);
+        if (!this.rb) {
+            this.rb = this.node.addComponent(RigidBody2D);
+        }
+        this.rb.type = ERigidBody2DType.Static;
+
+        // Создаём коллайдеры для стен
+        this.topCollider = this.node.addComponent(PolygonCollider2D);
+        this.bottomCollider = this.node.addComponent(PolygonCollider2D);
 
         // Размеры видимой области
         const visibleSize = view.getVisibleSize();
@@ -135,6 +153,21 @@ export class CorridorView extends Component {
         g.close();
         g.fill();
 
+        // Устанавливаем точки коллайдера для верхней стены
+        if (this.topCollider) {
+            const topPoints: Vec2[] = [];
+            topPoints.push(new Vec2(firstCanvasX, halfH));
+            for (let i = startIdx; i <= endIdx; i++) {
+                const seg = this.segments[i];
+                const cx = seg.x - this.scrollOffset - halfW;
+                const topEdge = seg.centerY + seg.corridorWidth / 2;
+                topPoints.push(new Vec2(cx, topEdge));
+            }
+            topPoints.push(new Vec2(lastCanvasX, halfH));
+            this.topCollider.points = topPoints;
+            this.topCollider.apply();
+        }
+
         // --- Нижняя стена ---
         g.moveTo(firstCanvasX, -halfH);
 
@@ -150,6 +183,21 @@ export class CorridorView extends Component {
         g.lineTo(lastCanvasX, -halfH);
         g.close();
         g.fill();
+
+        // Устанавливаем точки коллайдера для нижней стены
+        if (this.bottomCollider) {
+            const bottomPoints: Vec2[] = [];
+            bottomPoints.push(new Vec2(firstCanvasX, -halfH));
+            for (let i = startIdx; i <= endIdx; i++) {
+                const seg = this.segments[i];
+                const cx = seg.x - this.scrollOffset - halfW;
+                const bottomEdge = seg.centerY - seg.corridorWidth / 2;
+                bottomPoints.push(new Vec2(cx, bottomEdge));
+            }
+            bottomPoints.push(new Vec2(lastCanvasX, -halfH));
+            this.bottomCollider.points = bottomPoints;
+            this.bottomCollider.apply();
+        }
 
         // --- Отладочная линия центра коридора ---
         if (this.showDebugPath) {
