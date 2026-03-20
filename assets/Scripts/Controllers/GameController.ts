@@ -5,7 +5,7 @@ import {
 } from 'cc';
 import { PathGenerator } from '../Core/Generation/PathGenerator';
 import { PathSegment } from '../Core/Generation/IPathConfig';
-import { PlaneController } from '../Core/Systems/PlaneController';
+import { PlaneController } from './PlaneController';
 import { InputSystem } from '../Core/Systems/InputSystem';
 import { GameState } from '../Core/Models/GameState';
 import { LevelRegistry } from '../Core/Levels/LevelRegistry';

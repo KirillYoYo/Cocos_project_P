@@ -1,78 +1,98 @@
-﻿CCEffect %{
+CCEffect %{
   techniques:
   - passes:
     - vert: sprite-vs:vert
-      frag: gradient-fs:frag
+      frag: sprite-fs:frag
+      depthStencilState:
+        depthTest: false
+        depthWrite: false
+      blendState:
+        targets:
+        - blend: true
+          blendSrc: src_alpha
+          blendDst: one_minus_src_alpha
+          blendDstAlpha: one_minus_src_alpha
+      rasterizerState:
+        cullMode: none
       properties:
-        color1: { value: [1.0, 0.3, 0.0, 1.0], editor: { type: color } }     # Оранжевый
-        color2: { value: [0.0, 0.5, 1.0, 1.0], editor: { type: color } }     # Синий
-        color3: { value: [1.0, 0.0, 1.0, 1.0], editor: { type: color } }     # Фиолетовый
-        gradientType: { value: 0, editor: { type: "int", min: 0, max: 2 } }  # 0=линейный, 1=радиальный, 2=по Y
+        alphaThreshold: { value: 0.5 }
+        color1: { value: [1.0, 1.0, 1.0, 1.0], editor: {type: color} }
+        color2: { value: [1.0, 1.0, 1.0, 1.0], editor: {type: color} }
+        color3: { value: [1.0, 1.0, 1.0, 1.0], editor: {type: color} }
+        colorRadio: { value: 0.5}
 }%
 
 CCProgram sprite-vs %{
   precision highp float;
-  #include <cc-global>
-  
+  #include <builtin/uniforms/cc-global>
+  #if USE_LOCAL
+    #include <builtin/uniforms/cc-local>
+  #endif
+  #if SAMPLE_FROM_RT
+    #include <common/common-define>
+  #endif
   in vec3 a_position;
   in vec2 a_texCoord;
   in vec4 a_color;
-  
-  out vec2 v_texCoord;
-  out vec4 v_color;
-  
+
+  out vec4 color;
+  out vec2 uv0;
+
   vec4 vert () {
-    v_texCoord = a_texCoord;
-    v_color = a_color;
-    return cc_matViewProj * vec4(a_position, 1.0);
+    vec4 pos = vec4(a_position, 1);
+
+    #if USE_LOCAL
+      pos = cc_matWorld * pos;
+    #endif
+
+    #if USE_PIXEL_ALIGNMENT
+      pos = cc_matView * pos;
+      pos.xyz = floor(pos.xyz);
+      pos = cc_matProj * pos;
+    #else
+      pos = cc_matViewProj * pos;
+    #endif
+
+    uv0 = a_texCoord;
+    #if SAMPLE_FROM_RT
+      CC_HANDLE_RT_SAMPLE_FLIP(uv0);
+    #endif
+    color = a_color;
+
+    return pos;
   }
 }%
 
-CCProgram gradient-fs %{
+CCProgram sprite-fs %{
   precision highp float;
-  
-  in vec2 v_texCoord;
-  in vec4 v_color;
-  
-  uniform sampler2D cc_spriteTexture;
-  
-  uniform GradientColors {
+  #include <builtin/internal/embedded-alpha>
+  #include <builtin/internal/alpha-test>
+
+  in vec4 color;
+
+  uniform Constant{
     vec4 color1;
     vec4 color2;
     vec4 color3;
-    float gradientType;
+  };   
+
+  in vec2 uv0;
+  #pragma builtin(local)
+  layout(set = 2, binding = 11) uniform sampler2D cc_spriteTexture;
+
+  uniform ARGS{
+    float colorRadio;
   };
-  
+
   vec4 frag () {
-    // Берем альфу из текстуры BitmapFont
-    float alpha = texture(cc_spriteTexture, v_texCoord).a;
-    if (alpha < 0.01) discard;
-    
-    // Нормализованные UV для градиента
-    vec2 uv = v_texCoord * 2.0 - 1.0;
-    
-    float t;
-    if (gradientType == 0.0) {
-      // Линейный градиент (угол 45°)
-      t = dot(uv, vec2(0.707, 0.707));
-    } else if (gradientType == 1.0) {
-      // Радиальный градиент от центра
-      t = length(uv) * 0.5;
-    } else {
-      // Вертикальный градиент
-      t = uv.y * 0.5 + 0.5;
-    }
-    
-    // 3 цвета градиент
-    vec3 col;
-    if (t < 0.33) {
-      col = mix(color1.rgb, color2.rgb, t * 3.0);
-    } else if (t < 0.66) {
-      col = mix(color2.rgb, color3.rgb, (t - 0.33) * 3.0);
-    } else {
-      col = mix(color3.rgb, color1.rgb, (t - 0.66) * 3.0);
-    }
-    
-    return vec4(col, alpha);
+    vec4 o = vec4(1, 1, 1, 1); 
+    o *= CCSampleWithAlphaSeparated(cc_spriteTexture, uv0); 
+
+    o.rgb *= mix(color1.rgb, mix(color2.rgb, color3.rgb, smoothstep(0.0, colorRadio * 2.0, uv0.x)), smoothstep(0.0, colorRadio * 1.0, uv0.x));
+
+    o *= color;
+
+    ALPHA_TEST(o);
+    return o;
   }
 }%

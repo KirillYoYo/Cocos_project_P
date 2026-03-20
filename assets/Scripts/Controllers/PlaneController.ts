@@ -3,9 +3,9 @@ import {
     ERigidBody2DType, Collider2D, Contact2DType, IPhysics2DContact,
     Vec2, Vec3, PhysicsSystem2D
 } from 'cc';
-import { IPlaneConfig } from '../Generation/IPlaneConfig';
-import { EventBus } from '../../Managers/EventBus';
-import { GameEvent } from '../../Utils/Constants';
+import { IPlaneConfig } from '../Core/Generation/IPlaneConfig';
+import { EventBus } from '../Managers/EventBus';
+import { GameEvent } from '../Utils/Constants';
 
 const { ccclass } = _decorator;
 
