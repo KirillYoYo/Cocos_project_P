@@ -88,7 +88,13 @@ CCProgram sprite-fs %{
     vec4 o = vec4(1, 1, 1, 1); 
     o *= CCSampleWithAlphaSeparated(cc_spriteTexture, uv0); 
 
-    o.rgb *= mix(color1.rgb, mix(color2.rgb, color3.rgb, smoothstep(0.0, colorRadio * 2.0, uv0.x)), smoothstep(0.0, colorRadio * 1.0, uv0.x));
+    float vy = 1.0 - uv0.y;
+
+  o.rgb *= mix(
+    color1.rgb,
+    mix(color2.rgb, color3.rgb, smoothstep(0.0, colorRadio * 2.0, vy)),
+    smoothstep(0.0, colorRadio * 1.0, vy)
+  );
 
     o *= color;
 
