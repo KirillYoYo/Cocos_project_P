@@ -1,66 +1,55 @@
 import {
     _decorator, Component, Node, view, UITransform, Graphics,
-    Sprite, SpriteFrame, PhysicsSystem2D, ParticleSystem2D,
-    Vec2, Color, Texture2D, ImageAsset, log
+    Sprite, SpriteFrame,
+    Vec2, Color, log
 } from 'cc';
-import { PathGenerator } from '../Core/Generation/PathGenerator';
-import { PathSegment } from '../Core/Generation/IPathConfig';
-import { PlaneController } from './PlaneController';
-import { InputSystem } from '../Core/Systems/InputSystem';
 import { GameState } from '../Core/Models/GameState';
 import { LevelRegistry } from '../Core/Levels/LevelRegistry';
 import { ILevelConfig } from '../Core/Levels/ILevelConfig';
-import { CorridorView } from '../Views/Environment/CorridorView';
-import { PlaneView } from '../Views/Player/PlaneView';
-import { EventBus } from '../Managers/EventBus';
-import { GameEvent } from '../Utils/Constants';
+import { PlaneController } from './PlaneController';
+import { generateCurveVertices } from '../Core/Generation/GeneratedPoints';
 
 const { ccclass, property } = _decorator;
 
 /**
  * Главный контроллер игровой сцены.
- * Связывает генерацию → скролл → отображение.
  *
  * Установка в редакторе:
  * 1. Создать ноду Game под Canvas, добавить этот компонент
  * 2. Назначить SpriteFrame самолёта в поле planeSpriteFrame
- * 3. Запустить — коридор и самолёт создаются автоматически
  */
 @ccclass('GameController')
 export class GameController extends Component {
     /** Спрайт самолёта — назначить PNG в редакторе */
     @property(SpriteFrame)
     planeSpriteFrame: SpriteFrame | null = null;
-    // --- Системы ---
-    private pathGenerator: PathGenerator | null = null;
-    private planeController: PlaneController | null = null;
     private gameState: GameState = GameState.instance;
+    private graphicsNode: Node | null = null;
 
-    // --- Ввод ---
-    private inputSystem: InputSystem | null = null;
-
-    // --- View ---
-    private corridorView: CorridorView | null = null;
-    private planeView: PlaneView | null = null;
+    private planeController: PlaneController | null = null;
 
     // --- Конфиг ---
     private levelConfig: ILevelConfig | null = null;
 
-    // --- Состояние генерации ---
-    /** Текущее смещение скролла (px) */
-    private scrollOffset: number = 0;
-
-    /** X-координата до которой уже сгенерированы сегменты */
-    private generatedUpToX: number = 0;
-
-    /** Все сгенерированные сегменты пути */
-    private allSegments: PathSegment[] = [];
+    private graphics: Graphics | null = null;
+    private allPoints: Vec2[] = [];
+    visiblePoints: Vec2[] = [];
+    headIndex: number = 0;       // ← указатель на первую видимую точку
+    scrollOffset: number = 0;  // глобальный сдвиг всех точек влево
+    private fillingInProgress = false;
+    private scrollSpeed: number = 50;
 
     /** Размеры экрана */
     private screenWidth: number = 0;
     private screenHeight: number = 0;
 
+    private readonly CLEANUP_INTERVAL = 2.0; // сек
+    private lastCleanupTime = 0;
+
     start(): void {
+        this.graphics = this.getComponent(Graphics)!;
+        this.createGraphicsNode();
+
         // Получаем размеры видимой области
         const visibleSize = view.getVisibleSize();
         this.screenWidth = visibleSize.width;
@@ -69,287 +58,195 @@ export class GameController extends Component {
         // Загружаем конфиг первого уровня
         this.levelConfig = LevelRegistry.getConfig(1);
 
-        // Настраиваем 2D-физику (Box2D)
-        this.initPhysics();
-
-        // Инициализируем системы
-        this.pathGenerator = new PathGenerator(
-            this.levelConfig.path,
-            this.screenHeight
-        );
-
-        // Ввод — Cocos-компонент, добавляем на эту же ноду
-        this.inputSystem = this.node.addComponent(InputSystem);
-
-        // Создаём ноды для визуализации
-        this.createCorridorView();
-        this.createPlaneNode();
-
-        // Генерируем начальные сегменты
-        this.generateInitialSegments();
-
         // Запускаем игру
         this.gameState.isRunning = true;
+
+        this.allPoints = generateCurveVertices(1500, 300, 60, 0, 123)
+        this.allPoints.reverse(); // Реверс, чтобы pop() выдавал по порядку от начала к концу
+        this.fillVisiblePoints();
+        this.drawPoints();
+
+        this.createPlaneNode();
+    }
+
+    private async fillVisiblePoints(): Promise<void> {
+        if (this.fillingInProgress) return;
+        this.fillingInProgress = true;
+        
+        const targetX = this.screenWidth * 4 + this.scrollOffset;
+        
+        // Батчи по 10 точек каждые 2 кадра
+        while (this.getLastVisibleX() < targetX) {
+            for (let i = 0; i < 10; i++) {
+                const nextPoint = this.allPoints.pop();
+                if (nextPoint) this.visiblePoints.push(nextPoint);
+                else break;
+            }
+            
+            // ✅ Даём UI "подышать" — ждём следующий кадр
+            if (this.getLastVisibleX() < targetX) {
+                await new Promise(resolve => requestAnimationFrame(resolve));
+            }
+        }
+        
+        this.fillingInProgress = false;
+    }
+
+    private drawPoints() {
+        const centerX = this.screenWidth / 2;
+        const centerY = this.screenHeight / 2;
+        
+        this.graphics!.clear();
+        
+        // Рисуем с учётом headIndex
+        for (let i = this.headIndex; i < this.visiblePoints.length; i++) {
+            const point = this.visiblePoints[i];
+            const screenX = point.x - this.scrollOffset;
+            
+            if (screenX >= -50 && screenX <= this.screenWidth + 50) {
+                const localX = screenX - centerX;
+                const localY = point.y - centerY;
+
+                this.graphics!.circle(localX, localY, 8);
+                this.graphics!.fillColor = new Color(255, 100, 100, 255);
+                this.graphics!.fill();
+            }
+        }
     }
 
     update(dt: number): void {
-        // Не обновляем если игра не запущена или на паузе
         if (!this.gameState.isRunning || this.gameState.isPaused) return;
-        if (!this.planeController || !this.inputSystem || !this.corridorView) return;
-
-        // Передаём ввод в физику корабля (Box2D применяет силы)
-        const inputDir = this.inputSystem.getDirection();
-        this.planeController.applyInput(inputDir);
-
-        // Скролл мира = фиксированная горизонтальная скорость корабля
-        const forwardDelta = this.levelConfig!.plane.forwardSpeed * dt;
-        if (!this.planeController.isCollidingWithObstacles()) {
-            this.scrollOffset += forwardDelta;
-            this.gameState.totalDistance = this.scrollOffset;
+        
+        this.scrollOffset += this.scrollSpeed * dt;
+        
+        // 1. ✅ УДАЛЯЕМ слева — ПРОСТО сдвигаем указатель!
+        while (this.headIndex < this.visiblePoints.length) {
+            const screenX = this.visiblePoints[this.headIndex].x - this.scrollOffset;
+            if (screenX < -100) {
+                this.headIndex++;
+            } else {
+                break;
+            }
         }
-        this.gameState.planeY = this.planeController.getY();
-        this.gameState.currentScrollSpeed = this.levelConfig!.plane.forwardSpeed;
 
-        // Проверяем нужно ли генерировать новые сегменты
-        this.checkAndGenerateMore();
+        const now = performance.now() / 1000;
+        if (now - this.lastCleanupTime > this.CLEANUP_INTERVAL) {
+            this.cleanupOldPoints();
+            this.lastCleanupTime = now;
+        }
+        
+        // 2. ✅ ДОПОЛНЯЕМ справа
+        this.fillVisiblePoints();
 
-        // Удаляем старые сегменты за пределами экрана (экономия памяти)
-        this.pruneOldSegments();
+        const targetY = this.getCurveYAtCenter();
+        if (targetY !== null && this.planeController) {
+            this.planeController.setTargetY(targetY);
+        }
 
-        // Обновляем визуал коридора (корабль обновляется автоматически через Box2D)
-        this.corridorView.updateView(this.scrollOffset);
-
-        // Транслируем событие скролла
-        EventBus.emit(GameEvent.SCROLL_CHANGED, this.scrollOffset);
+        this.drawPoints();
     }
 
-    /**
-     * Создаёт дочернюю ноду с CorridorView и Graphics.
-     * Нода размещается в (0,0) родителя (центр Canvas).
-     */
-    private createCorridorView(): void {
-        const corridorNode = new Node('CorridorView');
-        this.node.addChild(corridorNode);
-
-        // UITransform — определяет размер области рисования
-        const transform = corridorNode.addComponent(UITransform);
-        transform.setContentSize(this.screenWidth, this.screenHeight);
-
-        // Graphics — компонент для отрисовки полигонов стен
-        corridorNode.addComponent(Graphics);
-
-        // CorridorView — наш компонент визуализации
-        this.corridorView = corridorNode.addComponent(CorridorView);
+    private getLastVisibleX(): number {
+        if (this.visiblePoints.length === 0) return 0;
+        return this.visiblePoints[this.visiblePoints.length - 1].x;
     }
 
-    /**
-     * Настраивает 2D-физику (Box2D).
-     * Важно: в Project Settings → Physics должен быть выбран Box2D как 2D physics engine.
-     */
-    private initPhysics(): void {
-        // Включаем физику и задаём гравитацию мира
-        PhysicsSystem2D.instance.enable = true;
-        PhysicsSystem2D.instance.gravity = new Vec2(0, -600);
+    
+    private createGraphicsNode() {
+        // Создаём дочерний узел
+        this.graphicsNode = new Node('GraphicsNode');
+        this.node.addChild(this.graphicsNode);
+
+        // Добавляем Graphics компонент
+        this.graphics = this.graphicsNode!.addComponent(Graphics);
+        this.graphics!.enabled = true;
     }
 
-    /**
-     * Создаёт ноду корабля с физикой (Box2D) и визуалом.
-     * Позиционируется на 20% от левого края, Y = 0.
-     * RigidBody2D управляет вертикальной позицией.
-     */
+    private cleanupOldPoints(): void {
+        // Создаём новый массив только с актуальными точками
+        const activePoints: Vec2[] = [];
+        for (let i = this.headIndex; i < this.visiblePoints.length; i++) {
+            activePoints.push(this.visiblePoints[i]);
+        }
+        
+        // // Заменяем старый массив новым (O(n) раз в 2 сек — НЕ критично!)
+        this.visiblePoints = activePoints;
+        this.headIndex = 0; // сбрасываем указатель
+    }
+ 
+    //
+    // PLANE
+    //
     private createPlaneNode(): void {
         if (!this.levelConfig) return;
 
         const planeNode = new Node('Plane');
         this.node.addChild(planeNode);
+        planeNode.setPosition(0, 0);
 
-        // Позиция: 20% от левого края, Y = 0
-        const planeX = -this.screenWidth / 2 + this.screenWidth * 0.2;
-        planeNode.setPosition(planeX, 0);
-
-        // UITransform — нужен для рендера и размера спрайта
         planeNode.addComponent(UITransform);
 
-        // Sprite — для отображения PNG самолёта
         const sprite = planeNode.addComponent(Sprite);
-        // Назначаем SpriteFrame из @property (если задан в редакторе)
         if (this.planeSpriteFrame) {
             sprite.spriteFrame = this.planeSpriteFrame;
         }
 
-        // PlaneView — визуал (управляет размером спрайта)
-        this.planeView = planeNode.addComponent(PlaneView);
-        this.planeView.setRadius(this.levelConfig.plane.colliderRadius);
+        this.planeController = planeNode.getComponent(PlaneController) || planeNode.addComponent(PlaneController);
+        this.planeController.init(this.levelConfig.plane);
+        this.planeController.setupVisual(this.planeSpriteFrame);
 
-        // PlaneController — физика (RigidBody2D + CircleCollider2D)
-        this.planeController = planeNode.addComponent(PlaneController);
-        this.planeController.init(this.levelConfig.plane, this.screenHeight, this.screenWidth);
-
-        // --- Выхлоп двигателя (частицы) ---
-        this.createEngineExhaust(planeNode);
-    }
-
-    /**
-     * Создаёт дочернюю ноду с ParticleSystem2D — выхлоп двигателя.
-     * Частицы летят назад (влево) от кормы корабля.
-     */
-    private createEngineExhaust(planeNode: Node): void {
-        if (!this.levelConfig) return;
-
-        const exhaustNode = new Node('EngineExhaust');
-        planeNode.addChild(exhaustNode);
-
-        // Позиция: за кормой корабля (левее центра на радиус)
-        const offsetX = -this.levelConfig.plane.colliderRadius;
-        exhaustNode.setPosition(0, offsetX * 2 + 15);
-
-        const ps = exhaustNode.addComponent(ParticleSystem2D);
-
-        // custom = true → игнорируем .plist, настраиваем вручную
-        ps.custom = true;
-
-        // Текстура частиц — белый квадрат 4x4, создаём программно
-        ps.spriteFrame = this.createWhiteSpriteFrame();
-
-        // Общие параметры
-        ps.totalParticles = 50;       // макс. частиц одновременно
-        ps.duration = -1;             // бесконечная эмиссия
-        ps.emissionRate = 30;         // частиц в секунду
-        ps.life = 1;                // время жизни частицы (сек)
-        ps.lifeVar = 1;            // разброс времени жизни
-
-        // Размер: начинают крупнее, затухают
-        ps.startSize = 10;
-        ps.startSizeVar = 5;
-        ps.endSize = 2;
-        ps.endSizeVar = 1;
-
-        ps.angle = -90;
-        ps.angleVar = 12;
-
-        // Скорость частиц (начальная, затем гасится gravity)
-        ps.speed = 100;
-        ps.speedVar = 20;
-
-        // Цвет: ярко-оранжевый → красный прозрачный
-        ps.startColor = new Color(255, 160, 50, 220);
-        ps.startColorVar = new Color(20, 30, 10, 0);
-        ps.endColor = new Color(255, 60, 10, 0);
-        ps.endColorVar = new Color(10, 10, 5, 0);
-
-        // Разброс позиции эмиттера (немного по Y)
-        ps.posVar = new Vec2(0, 3);
-
-        // Гравитационный режим (0 = Gravity, 1 = Radius)
-        ps.emitterMode = 0;
-        // Гравитация вверх тормозит частицы летящие вниз → они замирают
-        ps.gravity = new Vec2(0, 0);
-
-        // Запускаем эмиссию
-        ps.resetSystem();
-    }
-
-    /**
-     * Создаёт белый SpriteFrame 4x4 программно.
-     * Используется как текстура частиц — окрашивается через startColor/endColor.
-     */
-    private createWhiteSpriteFrame(): SpriteFrame {
-        // Создаём белый пиксельный буфер 4x4 (RGBA)
-        const size = 4;
-        const pixels = new Uint8Array(size * size * 4);
-        for (let i = 0; i < pixels.length; i++) {
-            pixels[i] = 255; // белый, полностью непрозрачный
-        }
-
-        // ImageAsset из сырых пикселей
-        const imageAsset = new ImageAsset();
-        imageAsset.reset({
-            _data: pixels,
-            _compressed: false,
-            width: size,
-            height: size,
-            format: Texture2D.PixelFormat.RGBA8888,
-        });
-
-        // Texture2D из ImageAsset
-        const texture = new Texture2D();
-        texture.image = imageAsset;
-
-        // SpriteFrame из текстуры
-        const sf = new SpriteFrame();
-        sf.texture = texture;
-        return sf;
-    }
-
-    /**
-     * Генерирует начальную порцию сегментов (заполняет экран + буфер вперёд).
-     */
-    private generateInitialSegments(): void {
-        if (!this.pathGenerator || !this.levelConfig) return;
-
-        const count = this.levelConfig.path.prebuildSegments;
-        const segments = this.pathGenerator.generateSegments(0, count, 0);
-
-        this.allSegments = segments;
-        this.generatedUpToX = segments.length > 0
-            ? segments[segments.length - 1].x + this.levelConfig.path.segmentLength
-            : 0;
-
-        // Передаём сегменты в View
-        this.corridorView?.setSegments(this.allSegments);
-    }
-
-    /**
-     * Проверяет, нужно ли генерировать новые сегменты.
-     * Если правый край экрана приближается к generatedUpToX — генерируем ещё.
-     */
-    private checkAndGenerateMore(): void {
-        if (!this.pathGenerator || !this.levelConfig) return;
-
-        // Правый край видимой области в мировых координатах
-        const rightEdge = this.scrollOffset + this.screenWidth;
-        const cfg = this.levelConfig.path;
-
-        // Генерируем когда до края осталось меньше половины буфера
-        const threshold = cfg.prebuildSegments * cfg.segmentLength * 0.5;
-
-        if (this.generatedUpToX - rightEdge < threshold) {
-            // Генерируем новую порцию
-            const newSegments = this.pathGenerator.generateSegments(
-                this.generatedUpToX,
-                cfg.prebuildSegments,
-                this.gameState.totalDistance
-            );
-
-            // Добавляем к общему массиву и обновляем View
-            this.allSegments = this.allSegments.concat(newSegments);
-            this.corridorView?.setSegments(this.allSegments);
-
-            // Обновляем границу генерации
-            if (newSegments.length > 0) {
-                this.generatedUpToX = newSegments[newSegments.length - 1].x + cfg.segmentLength;
-            }
+        // Устанавливаем начальную позицию: X в центре (0), Y по интерполированной кривой у центра экрана
+        const initialY = this.getCurveYAtCenter();
+        if (initialY !== null) {
+            planeNode.setPosition(0, initialY, 0);
+        } else {
+            planeNode.setPosition(0, 0, 0);
         }
     }
 
-    /**
-     * Удаляет сегменты, которые ушли далеко за левый край экрана.
-     * Освобождает память при бесконечной генерации.
-     */
-    private pruneOldSegments(): void {
-        // Удаляем сегменты, которые на 2 экрана левее текущей позиции
-        const pruneThreshold = this.scrollOffset - this.screenWidth * 2;
+    private getCurveYAtCenter(): number | null {
+        if (this.visiblePoints.length < 2) return null;
 
-        let cutIndex = 0;
-        while (cutIndex < this.allSegments.length &&
-               this.allSegments[cutIndex].x < pruneThreshold) {
-            cutIndex++;
+        const centerX = this.screenWidth / 2;
+        const points = this.visiblePoints
+            .slice(this.headIndex)
+            .map(p => new Vec2(p.x - this.scrollOffset, p.y));
+
+        // Найдём сегмент для центра экрана
+        let i = 0;
+        while (i + 1 < points.length && points[i + 1].x < centerX) {
+            i++;
         }
 
-        if (cutIndex > 0) {
-            this.allSegments.splice(0, cutIndex);
-            // Обновляем ссылку в View
-            this.corridorView?.setSegments(this.allSegments);
+        if (i + 1 >= points.length) {
+            i = points.length - 2;
         }
+        if (i < 0) i = 0;
+
+        const p1 = points[i];
+        const p2 = points[i + 1];
+        const segmentHeight = p2.x - p1.x;
+
+        if (segmentHeight === 0) {
+            return p1.y - this.screenHeight / 2;
+        }
+
+        const t = (centerX - p1.x) / segmentHeight;
+
+        const p0 = i > 0 ? points[i - 1] : p1;
+        const p3 = i + 2 < points.length ? points[i + 2] : p2;
+
+        const yCurve = this.catmullRom(p0.y, p1.y, p2.y, p3.y, t);
+        return yCurve - this.screenHeight / 2;
     }
+
+    private catmullRom(p0: number, p1: number, p2: number, p3: number, t: number): number {
+        const t2 = t * t;
+        const t3 = t2 * t;
+        return 0.5 * ((2 * p1)
+            + (-p0 + p2) * t
+            + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2
+            + (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
+    }
+    // END PLANE
 }

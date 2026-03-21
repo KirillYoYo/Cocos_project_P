@@ -1,237 +1,125 @@
 import {
-    _decorator, Component, RigidBody2D, CircleCollider2D,
-    ERigidBody2DType, Collider2D, Contact2DType, IPhysics2DContact,
-    Vec2, Vec3, PhysicsSystem2D
+    _decorator, Component, Node, UITransform, Sprite, SpriteFrame,
+    ParticleSystem2D, Vec2, Color, Texture2D, ImageAsset,
 } from 'cc';
+import { PlaneView } from '../Views/Player/PlaneView';
 import { IPlaneConfig } from '../Core/Generation/IPlaneConfig';
-import { EventBus } from '../Managers/EventBus';
-import { GameEvent } from '../Utils/Constants';
 
 const { ccclass } = _decorator;
 
-/**
- * Управляет физикой корабля через Box2D.
- * Заменяет PlaneSystem — физика теперь в движке, а не в ручных расчётах.
- *
- * Механика:
- * - Гравитация тянет корабль вниз (gravityScale)
- * - Нажатие вверх → сила вверх (медленный подъём, борется с гравитацией)
- * - Нажатие вниз → сила вниз (быстрое пикирование, суммируется с гравитацией)
- * - Без ввода → корабль постепенно падает под действием гравитации
- * - linearDamping обеспечивает сопротивление воздуха / инерцию
- *
- * Установка: добавляется программно через GameController.
- * Требование: в Project Settings → Physics выбрать Box2D как 2D physics engine.
- */
 @ccclass('PlaneController')
 export class PlaneController extends Component {
-    /** Ссылка на RigidBody2D (кешируется после init) */
-    private rb: RigidBody2D | null = null;
-
-    /** Конфиг физики корабля */
     private config: IPlaneConfig | null = null;
+    private targetY: number | null = null;
+    private verticalSpeed = 350; // px/sec
 
-    /** Временный Vec2 для приложения сил (избегаем аллокаций каждый кадр) */
-    private forceVec: Vec2 = new Vec2();
-
-    /** Половина высоты экрана (для ограничения по Y) */
-    private halfScreenHeight: number = 0;
-
-    /** Половина ширины экрана (для ограничения по X) */
-    private halfScreenWidth: number = 0;
-
-    /** Начальная X-позиция корабля */
-    private initialX: number = 0;
-
-    /** Флаг столкновения с препятствиями */
-    private isColliding: boolean = false;
-
-    /** Временный Vec3 для позиции (избегаем аллокаций) */
-    private tempPos: Vec3 = new Vec3();
+    private planeView: PlaneView | null = null;
 
     /**
-     * Инициализирует физику корабля.
-     * Вызывается из GameController после добавления компонента.
-     * Настраивает RigidBody2D и CircleCollider2D.
+     * Инициализация логики самолёта.
      */
-    init(config: IPlaneConfig, screenHeight: number, screenWidth: number): void {
+    init(config: IPlaneConfig): void {
         this.config = config;
-        // Сохраняем половину высоты экрана для ограничения позиции
-        this.halfScreenHeight = screenHeight / 2;
-        // Сохраняем половину ширины экрана для ограничения позиции
-        this.halfScreenWidth = screenWidth / 2;
-        // Сохраняем начальную X-позицию
-        this.initialX = this.node.position.x;
-        // --- RigidBody2D ---
-        this.rb = this.getComponent(RigidBody2D);
-        if (!this.rb) {
-            this.rb = this.node.addComponent(RigidBody2D);
-        }
-        // Dynamic — физика управляет позицией
-        this.rb.type = ERigidBody2DType.Dynamic;
-        // Не вращать корабль от столкновений
-        this.rb.fixedRotation = true;
-        // Гравитация: корабль падает без ввода
-        this.rb.gravityScale = config.gravityScale;
-        // Сопротивление воздуха / инерция
-        this.rb.linearDamping = config.linearDamping;
-        // Включаем колбэки столкновений
-        this.rb.enabledContactListener = true;
-
-        // --- CircleCollider2D ---
-        let collider = this.getComponent(CircleCollider2D);
-        if (!collider) {
-            collider = this.node.addComponent(CircleCollider2D);
-        }
-        collider.radius = config.colliderRadius;
-        // Применяем изменения коллайдера
-        collider.apply();
-
-        // --- Contact callbacks ---
-        collider.on(Contact2DType.BEGIN_CONTACT, this.onBeginContact, this);
-        collider.on(Contact2DType.END_CONTACT, this.onEndContact, this);
+        this.verticalSpeed = config.upForce || 350;
     }
 
     /**
-     * Применяет ввод игрока: прикладывает силу вверх или вниз.
-     * Вызывается каждый кадр из GameController.
-     * @param inputDir — 1 = вверх, -1 = вниз, 0 = нет ввода
+     * Настройка визуала самолёта:
+     * - создаёт выхлоп двигателя.
      */
-    applyInput(inputDir: number): void {
-        if (!this.rb || !this.config) return;
+    setupVisual(spriteFrame: SpriteFrame | null): void {
+        // PlaneView
+        this.planeView = this.getComponent(PlaneView) || this.node.addComponent(PlaneView);
 
-        if (inputDir > 0) {
-            // Вверх — сила против гравитации (медленный подъём)
-            this.forceVec.set(0, this.config.upForce);
-            this.rb.applyForceToCenter(this.forceVec, true);
-        } else if (inputDir < 0) {
-            // Вниз — дополнительная сила к гравитации (пикирование)
-            this.forceVec.set(0, -this.config.downForce);
-            this.rb.applyForceToCenter(this.forceVec, true);
-        }
-        // inputDir === 0 → ничего не делаем, гравитация тянет вниз сама
-
-        // Ограничиваем вертикальную скорость
-        this.clampVelocity();
+        // Выхлоп двигателя
+        this.createEngineExhaust();
     }
 
     /**
-     * Ограничивает вертикальную скорость (разные лимиты вверх/вниз).
-     * Горизонтальную скорость обнуляем — корабль не двигается по X.
+     * Установка целевой позиции Y для самолёта.
+     * PlaneController сам решает, как двигаться к этой точке.
      */
-    private clampVelocity(): void {
-        if (!this.rb || !this.config) return;
+    setTargetY(y: number): void {
+        this.targetY = y;
+    }
 
-        const vel = this.rb.linearVelocity;
+    update(dt: number): void {
+        if (this.targetY === null) return;
 
-        // Обнуляем горизонтальную скорость (корабль зафиксирован по X)
-        vel.x = 0;
+        // Плавное движение к targetY
+        const currentY = this.node.position.y;
+        const dy = (this.targetY - currentY) * 0.3; // 0.3 — коэффициент сглаживания, можно вынести в конфиг
+        const nextY = currentY + dy;
 
-        // Ограничиваем вертикальную скорость
-        if (vel.y > this.config.maxUpSpeed) {
-            vel.y = this.config.maxUpSpeed;
-        } else if (vel.y < -this.config.maxDownSpeed) {
-            vel.y = -this.config.maxDownSpeed;
-        }
-
-        this.rb.linearVelocity = vel;
+        this.node.setPosition(this.node.position.x, nextY, this.node.position.z);
     }
 
     /**
-     * Вызывается после физического шага — ограничиваем позицию экраном.
-     * lateUpdate гарантирует, что Box2D уже обновил позицию ноды.
+     * Создаёт выхлоп двигателя (частицы) на корме самолёта.
      */
-    lateUpdate(): void {
-        this.clampPosition();
+    private createEngineExhaust(): void {
+        const exhaustNode = new Node('EngineExhaust');
+        this.node.addChild(exhaustNode);
+
+        const colliderRadius = this.config?.colliderRadius ?? 20;
+        exhaustNode.setPosition(0, -colliderRadius);
+
+        const ps = exhaustNode.addComponent(ParticleSystem2D);
+        ps.custom = true;
+        ps.spriteFrame = this.createWhiteSpriteFrame();
+
+        ps.totalParticles = 50;
+        ps.duration = -1;
+        ps.emissionRate = 30;
+        ps.life = 1;
+        ps.lifeVar = 1;
+        ps.startSize = 10;
+        ps.startSizeVar = 5;
+        ps.endSize = 2;
+        ps.endSizeVar = 1;
+        ps.angle = -90;
+        ps.angleVar = 12;
+        ps.speed = 100;
+        ps.speedVar = 20;
+
+        ps.startColor = new Color(255, 160, 50, 220);
+        ps.startColorVar = new Color(20, 30, 10, 0);
+        ps.endColor = new Color(255, 60, 10, 0);
+        ps.endColorVar = new Color(10, 10, 5, 0);
+
+        ps.posVar = new Vec2(0, 3);
+        ps.emitterMode = 0;
+        ps.gravity = new Vec2(0, 0);
+
+        ps.resetSystem();
     }
 
     /**
-     * Ограничивает Y-позицию корабля в пределах экрана.
-     * X-позиция фиксирована на начальной.
-     * Учитывает радиус коллайдера — корабль не выходит за край даже частично.
-     * При касании границы обнуляет вертикальную скорость.
+     * Создаёт белый спрайт‑квадрат 4×4 для частиц.
+     * Текстура окрашивается через startColor/endColor, поэтому может быть чисто белой.
      */
-    private clampPosition(): void {
-        if (!this.rb || !this.config || this.halfScreenHeight === 0) return;
-
-        const pos = this.node.position;
-        const radius = this.config.colliderRadius;
-        // Верхняя и нижняя границы с учётом размера корабля
-        const maxY = this.halfScreenHeight - radius;
-        const minY = -this.halfScreenHeight + radius;
-
-        // Фиксируем X на начальной позиции
-        let clampedY = pos.y;
-
-        if (pos.y > maxY) {
-            // Корабль упёрся в потолок — прижимаем и гасим скорость вверх
-            clampedY = maxY;
-            const vel = this.rb.linearVelocity;
-            if (vel.y > 0) vel.y = 0;
-            this.rb.linearVelocity = vel;
-        } else if (pos.y < minY) {
-            // Корабль упёрся в пол — прижимаем и гасим скорость вниз
-            clampedY = minY;
-            const vel = this.rb.linearVelocity;
-            if (vel.y < 0) vel.y = 0;
-            this.rb.linearVelocity = vel;
+    private createWhiteSpriteFrame(): SpriteFrame {
+        const size = 4;
+        const pixels = new Uint8Array(size * size * 4);
+        for (let i = 0; i < pixels.length; i++) {
+            pixels[i] = 255; // RGBA: white, fully opaque
         }
 
-        // Устанавливаем позицию (X фиксирован, Y clamped)
-        this.tempPos.set(this.initialX, clampedY, pos.z);
-        this.node.setPosition(this.tempPos);
-    }
+        const imageAsset = new ImageAsset();
+        imageAsset.reset({
+            _data: pixels,
+            _compressed: false,
+            width: size,
+            height: size,
+            format: Texture2D.PixelFormat.RGBA8888,
+        });
 
-    /** Текущая Y-позиция корабля */
-    getY(): number {
-        return this.node.position.y;
-    }
+        const texture = new Texture2D();
+        texture.image = imageAsset;
 
-    /** Текущая вертикальная скорость (px/сек) */
-    getVelocityY(): number {
-        return this.rb ? this.rb.linearVelocity.y : 0;
-    }
+        const sf = new SpriteFrame();
+        sf.texture = texture;
 
-    /** Проверяет, сталкивается ли корабль с препятствиями */
-    isCollidingWithObstacles(): boolean {
-        return this.isColliding;
-    }
-
-    // --- Contact Callbacks ---
-
-    /**
-     * Вызывается Box2D при начале контакта с другим коллайдером.
-     * Отправляет событие PLAYER_HIT через EventBus.
-     */
-    private onBeginContact(
-        selfCollider: Collider2D,
-        otherCollider: Collider2D,
-        contact: IPhysics2DContact | null
-    ): void {
-        // Устанавливаем флаг столкновения
-        this.isColliding = true;
-
-        // Уведомляем систему о столкновении
-        EventBus.emit(GameEvent.PLAYER_HIT, { collider: otherCollider, contact: contact, power: 1 });
-    }
-
-    /**
-     * Вызывается Box2D при окончании контакта.
-     * Пока пустой — заготовка для будущей логики.
-     */
-    private onEndContact(
-        selfCollider: Collider2D,
-        otherCollider: Collider2D,
-        contact: IPhysics2DContact | null
-    ): void {
-        // Сбрасываем флаг столкновения
-        this.isColliding = false;
-    }
-
-    /** Сброс физики к начальному состоянию */
-    reset(): void {
-        if (!this.rb) return;
-        this.rb.linearVelocity = new Vec2(0, 0);
-        this.node.setPosition(this.node.position.x, 0);
+        return sf;
     }
 }
