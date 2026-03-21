@@ -1,16 +1,13 @@
 import {
-    _decorator, Component, Node, UITransform, Sprite, SpriteFrame,
+    _decorator, Component, Node, SpriteFrame,
     ParticleSystem2D, Vec2, Color, Texture2D, ImageAsset,
 } from 'cc';
 import { PlaneView } from '../Views/Player/PlaneView';
-import { IPlaneConfig } from '../Core/Generation/IPlaneConfig';
 
 const { ccclass } = _decorator;
 
 @ccclass('PlaneController')
 export class PlaneController extends Component {
-    private config: IPlaneConfig | null = null;
-    private targetY: number | null = null;
     private speed = null;
 
     private planeView: PlaneView | null = null;
@@ -18,8 +15,7 @@ export class PlaneController extends Component {
     /**
      * Инициализация логики самолёта.
      */
-    init(config: IPlaneConfig, speed: number): void {
-        this.config = config;
+    init(speed: number): void {
         this.speed = speed;
     }
 
@@ -56,8 +52,6 @@ export class PlaneController extends Component {
         const exhaustNode = new Node('EngineExhaust');
         this.node.addChild(exhaustNode);
 
-        const colliderRadius = this.config?.colliderRadius ?? 20;
-        exhaustNode.setPosition(0, -colliderRadius);
 
         const ps = exhaustNode.addComponent(ParticleSystem2D);
         ps.custom = true;

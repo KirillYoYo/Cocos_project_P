@@ -1,4 +1,3 @@
-import { IPathConfig } from '../Generation/IPathConfig';
 import { IPlaneConfig } from '../Generation/IPlaneConfig';
 
 /**
@@ -22,23 +21,10 @@ export interface ILevelConfig {
     /** Очки, необходимые для перехода на следующий уровень */
     targetScore: number;
 
-    // --- Генерация пути ---
-
-    /** Параметры процедурной генерации коридора */
-    path: IPathConfig;
-
     // --- Физика корабля ---
 
     /** Параметры физики корабля (движение, инерция, скорость скролла) */
     plane: IPlaneConfig;
-
-    // --- Камера / Зум ---
-
-    /** Стандартный уровень зума (1.0 = нормальный) */
-    cameraZoomDefault: number;
-
-    /** Список зум-событий, привязанных к прогрессу */
-    cameraEvents: ICameraEvent[];
 }
 
 /**

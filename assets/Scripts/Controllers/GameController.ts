@@ -195,7 +195,7 @@ export class GameController extends Component {
         }
 
         this.planeController = planeNode.getComponent(PlaneController) || planeNode.addComponent(PlaneController);
-        this.planeController.init(this.levelConfig.plane, this.scrollSpeed);
+        this.planeController.init(this.scrollSpeed);
         this.planeController.setupVisual(this.planeSpriteFrame);
 
         // Устанавливаем начальную позицию: X в центре (0), Y по интерполированной кривой у центра экрана
