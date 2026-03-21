@@ -9,7 +9,7 @@ import { ILevelConfig } from '../Core/Levels/ILevelConfig';
 import { PlaneController } from './PlaneController';
 import { generateCurveVertices } from '../Core/Generation/GeneratedPoints';
 import { GAME_CONFIG } from './GAME_CONFIG';
-
+    
 const { ccclass, property } = _decorator;
 
 /**
