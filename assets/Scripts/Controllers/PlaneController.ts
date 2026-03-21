@@ -35,23 +35,18 @@ export class PlaneController extends Component {
         this.createEngineExhaust();
     }
 
-    /**
-     * Установка целевой позиции Y для самолёта.
-     * PlaneController сам решает, как двигаться к этой точке.
-     */
-    setTargetY(y: number): void {
-        this.targetY = y;
+    setPositionY(y: number): void {
+        const p = this.node.position;
+        this.node.setPosition(p.x, y, p.z);
     }
 
-    update(dt: number): void {
-        if (this.targetY === null) return;
+    setPositionYSmooth(y: number, dt: number): void {
+        const p = this.node.position;
 
-        // Плавное движение к targetY
-        const currentY = this.node.position.y;
-        const dy = (this.targetY - currentY) * 0.3; // 0.3 — коэффициент сглаживания, можно вынести в конфиг
-        const nextY = currentY + dy;
+        const smooth = 8; // коэффициент сглаживания
+        const newY = p.y + (y - p.y) * Math.min(1, smooth * dt);
 
-        this.node.setPosition(this.node.position.x, nextY, this.node.position.z);
+        this.node.setPosition(p.x, newY, p.z);
     }
 
     /**

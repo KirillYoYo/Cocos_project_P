@@ -8,6 +8,7 @@ import { LevelRegistry } from '../Core/Levels/LevelRegistry';
 import { ILevelConfig } from '../Core/Levels/ILevelConfig';
 import { PlaneController } from './PlaneController';
 import { generateCurveVertices } from '../Core/Generation/GeneratedPoints';
+import { GAME_CONFIG } from './GAME_CONFIG';
 
 const { ccclass, property } = _decorator;
 
@@ -37,7 +38,7 @@ export class GameController extends Component {
     headIndex: number = 0;       // ← указатель на первую видимую точку
     scrollOffset: number = 0;  // глобальный сдвиг всех точек влево
     private fillingInProgress = false;
-    private scrollSpeed: number = 90;
+    private scrollSpeed: number = GAME_CONFIG.speed;
 
     /** Размеры экрана */
     private screenWidth: number = 0;
@@ -61,7 +62,7 @@ export class GameController extends Component {
         // Запускаем игру
         this.gameState.isRunning = true;
 
-        this.allPoints = generateCurveVertices(1500, 300, 60, 0, 123)
+        this.allPoints = generateCurveVertices(GAME_CONFIG.poinsLength, GAME_CONFIG.amplitude, GAME_CONFIG.baseSpacing, GAME_CONFIG.verticalOffset, 123)
         this.allPoints.reverse(); // Реверс, чтобы pop() выдавал по порядку от начала к концу
         this.fillVisiblePoints();
         this.drawPoints();
@@ -102,16 +103,17 @@ export class GameController extends Component {
         for (let i = this.headIndex; i < this.visiblePoints.length; i++) {
             const point = this.visiblePoints[i];
             const screenX = point.x - this.scrollOffset;
-            
+
             if (screenX >= -50 && screenX <= this.screenWidth + 50) {
                 const localX = screenX - centerX;
                 const localY = point.y - centerY;
 
                 this.graphics!.circle(localX, localY, 8);
-                this.graphics!.fillColor = new Color(255, 100, 100, 255);
-                this.graphics!.fill();
             }
         }
+
+        this.graphics!.fillColor = new Color(255, 100, 100, 255);
+        this.graphics!.fill();
     }
 
     update(dt: number): void {
@@ -140,7 +142,7 @@ export class GameController extends Component {
 
         const targetY = this.getCurveYAtCenter();
         if (targetY !== null && this.planeController) {
-            this.planeController.setTargetY(targetY);
+            this.planeController.setPositionY(targetY);
         }
 
         this.drawPoints();
@@ -163,6 +165,7 @@ export class GameController extends Component {
     }
 
     private cleanupOldPoints(): void {
+        // TODO проверить как будет себя ring buffer
         // Создаём новый массив только с актуальными точками
         const activePoints: Vec2[] = [];
         for (let i = this.headIndex; i < this.visiblePoints.length; i++) {
