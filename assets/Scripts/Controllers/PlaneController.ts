@@ -11,16 +11,16 @@ const { ccclass } = _decorator;
 export class PlaneController extends Component {
     private config: IPlaneConfig | null = null;
     private targetY: number | null = null;
-    private verticalSpeed = 350; // px/sec
+    private speed = null;
 
     private planeView: PlaneView | null = null;
 
     /**
      * Инициализация логики самолёта.
      */
-    init(config: IPlaneConfig): void {
+    init(config: IPlaneConfig, speed: number): void {
         this.config = config;
-        this.verticalSpeed = config.upForce || 350;
+        this.speed = speed;
     }
 
     /**
@@ -68,31 +68,52 @@ export class PlaneController extends Component {
         ps.custom = true;
         ps.spriteFrame = this.createWhiteSpriteFrame();
 
-        ps.totalParticles = 50;
-        ps.duration = -1;
-        ps.emissionRate = 30;
-        ps.life = 1;
-        ps.lifeVar = 1;
-        ps.startSize = 10;
-        ps.startSizeVar = 5;
-        ps.endSize = 2;
-        ps.endSizeVar = 1;
+        // 🔑 Нормализация скорости
+        const minSpeed = 50;
+        const maxSpeed = 550;
+
+        const clampedSpeed = Math.max(minSpeed, Math.min(maxSpeed, this.speed));
+        const t = (clampedSpeed - minSpeed) / (maxSpeed - minSpeed); // 0 → 1
+
+        ps.totalParticles = Math.floor(20 + t * 260);
+        ps.emissionRate = 25 + t * 90;
+
+        ps.life = 0.5 + t * 1.3;
+        ps.lifeVar = 0.2 * (1 - t);
+
+        ps.speed = 60 + t * 320;
+        ps.speedVar = 30 * (1 - t);
+
+        // 👉 сильный разброс только на малой скорости
+        ps.posVar = new Vec2(0, 20 * Math.pow(1 - t, 1.5));
+
         ps.angle = -90;
-        ps.angleVar = 12;
-        ps.speed = 100;
-        ps.speedVar = 20;
+        ps.angleVar = 25 * Math.pow(1 - t, 2);
+
+        // 👉 КРИТИЧНО: почти убираем гравитацию на большой скорости
+        ps.gravity = new Vec2(0, 100 * Math.pow(1 - t, 2));
+
+        if (t > 0.85) {
+            ps.angleVar = 0;
+            ps.posVar = new Vec2(0, 0);
+            ps.speedVar = 0;
+            ps.lifeVar = 0;
+            ps.gravity = new Vec2(0, 0);
+        }
+
+        ps.startSize = 14 - t * 8;
+        ps.startSizeVar = 3 * (1 - t);
+        ps.endSize = 2;
 
         ps.startColor = new Color(255, 160, 50, 220);
-        ps.startColorVar = new Color(20, 30, 10, 0);
-        ps.endColor = new Color(255, 60, 10, 0);
-        ps.endColorVar = new Color(10, 10, 5, 0);
+        ps.endColor = new Color(255, 80, 20, 0);
 
-        ps.posVar = new Vec2(0, 3);
+        ps.duration = -1;
         ps.emitterMode = 0;
-        ps.gravity = new Vec2(0, 0);
 
         ps.resetSystem();
     }
+
 
     /**
      * Создаёт белый спрайт‑квадрат 4×4 для частиц.

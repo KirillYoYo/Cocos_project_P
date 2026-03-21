@@ -37,7 +37,7 @@ export class GameController extends Component {
     headIndex: number = 0;       // ← указатель на первую видимую точку
     scrollOffset: number = 0;  // глобальный сдвиг всех точек влево
     private fillingInProgress = false;
-    private scrollSpeed: number = 50;
+    private scrollSpeed: number = 90;
 
     /** Размеры экрана */
     private screenWidth: number = 0;
@@ -192,7 +192,7 @@ export class GameController extends Component {
         }
 
         this.planeController = planeNode.getComponent(PlaneController) || planeNode.addComponent(PlaneController);
-        this.planeController.init(this.levelConfig.plane);
+        this.planeController.init(this.levelConfig.plane, this.scrollSpeed);
         this.planeController.setupVisual(this.planeSpriteFrame);
 
         // Устанавливаем начальную позицию: X в центре (0), Y по интерполированной кривой у центра экрана
