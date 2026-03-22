@@ -9,6 +9,7 @@ import { ILevelConfig } from '../Core/Levels/ILevelConfig';
 import { PlaneController } from './PlaneController';
 import { generateCurveVertices } from '../Core/Generation/GeneratedPoints';
 import { GAME_CONFIG } from './GAME_CONFIG';
+import { CurveManager } from '../Core/Curve/CurveManager';
     
 const { ccclass, property } = _decorator;
 
@@ -47,6 +48,8 @@ export class GameController extends Component {
     private readonly CLEANUP_INTERVAL = 2.0; // сек
     private lastCleanupTime = 0;
 
+    private curve: CurveManager | null = null;
+
     start(): void {
         this.graphics = this.getComponent(Graphics)!;
         this.createGraphicsNode();
@@ -62,10 +65,19 @@ export class GameController extends Component {
         // Запускаем игру
         this.gameState.isRunning = true;
 
-        this.allPoints = generateCurveVertices(GAME_CONFIG.poinsLength, GAME_CONFIG.amplitude, GAME_CONFIG.baseSpacing, GAME_CONFIG.verticalOffset, 123)
-        this.allPoints.reverse(); // Реверс, чтобы pop() выдавал по порядку от начала к концу
-        this.fillVisiblePoints();
-        this.drawPoints();
+        this.curve = new CurveManager(this.screenWidth, this.screenHeight);
+
+        this.curve.init(
+            generateCurveVertices(
+                GAME_CONFIG.poinsLength,
+                GAME_CONFIG.amplitude,
+                GAME_CONFIG.baseSpacing,
+                GAME_CONFIG.verticalOffset,
+                123
+            )
+        );
+
+        this.curve.fillVisiblePoints();
 
         this.createPlaneNode();
     }
@@ -96,13 +108,14 @@ export class GameController extends Component {
     private drawPoints() {
         const centerX = this.screenWidth / 2;
         const centerY = this.screenHeight / 2;
-        
+
         this.graphics!.clear();
-        
-        // Рисуем с учётом headIndex
-        for (let i = this.headIndex; i < this.visiblePoints.length; i++) {
-            const point = this.visiblePoints[i];
-            const screenX = point.x - this.scrollOffset;
+
+        const points = this.curve!.getRenderablePoints();
+        const offset = this.curve!.getScrollOffset();
+
+        for (const point of points) {
+            const screenX = point.x - offset;
 
             if (screenX >= -50 && screenX <= this.screenWidth + 50) {
                 const localX = screenX - centerX;
@@ -117,7 +130,7 @@ export class GameController extends Component {
     }
 
     update(dt: number): void {
-        if (!this.gameState.isRunning || this.gameState.isPaused) return;
+        if (!this.gameState.isRunning || this.gameState.isPaused || !this.curve) return;
         
         this.scrollOffset += this.scrollSpeed * dt;
         
@@ -131,16 +144,17 @@ export class GameController extends Component {
             }
         }
 
+        this.curve!.update(dt, this.scrollSpeed);
+
         const now = performance.now() / 1000;
         if (now - this.lastCleanupTime > this.CLEANUP_INTERVAL) {
-            this.cleanupOldPoints();
+            this.curve!.cleanup();
             this.lastCleanupTime = now;
         }
-        
-        // 2. ✅ ДОПОЛНЯЕМ справа
-        this.fillVisiblePoints();
 
-        const targetY = this.getCurveYAtCenter();
+        this.curve!.fillVisiblePoints();
+
+        const targetY = this.curve!.getYAtCenter();
         if (targetY !== null && this.planeController) {
             this.planeController.setPositionY(targetY);
         }
