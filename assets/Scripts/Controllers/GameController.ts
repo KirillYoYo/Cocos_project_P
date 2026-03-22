@@ -77,32 +77,9 @@ export class GameController extends Component {
             )
         );
 
-        this.curve.fillVisiblePoints();
+        this.curve.fillVisiblePointsStep(1.5);
 
         this.createPlaneNode();
-    }
-
-    private async fillVisiblePoints(): Promise<void> {
-        if (this.fillingInProgress) return;
-        this.fillingInProgress = true;
-        
-        const targetX = this.screenWidth * 4 + this.scrollOffset;
-        
-        // Батчи по 10 точек каждые 2 кадра
-        while (this.getLastVisibleX() < targetX) {
-            for (let i = 0; i < 10; i++) {
-                const nextPoint = this.allPoints.pop();
-                if (nextPoint) this.visiblePoints.push(nextPoint);
-                else break;
-            }
-            
-            // ✅ Даём UI "подышать" — ждём следующий кадр
-            if (this.getLastVisibleX() < targetX) {
-                await new Promise(resolve => requestAnimationFrame(resolve));
-            }
-        }
-        
-        this.fillingInProgress = false;
     }
 
     private drawPoints() {
@@ -152,7 +129,7 @@ export class GameController extends Component {
             this.lastCleanupTime = now;
         }
 
-        this.curve!.fillVisiblePoints();
+        this.curve!.fillVisiblePointsStep(1.5);
 
         const targetY = this.curve!.getYAtCenter();
         if (targetY !== null && this.planeController) {

@@ -33,25 +33,21 @@ export class CurveManager {
         }
     }
 
-    async fillVisiblePoints() {
-        if (this.fillingInProgress) return;
-        this.fillingInProgress = true;
-
+    fillVisiblePointsStep(timeBudgetMs = 1.5) {
+        const start = performance.now();
         const targetX = this.screenWidth * 4 + this.scrollOffset;
 
         while (this.getLastVisibleX() < targetX) {
-            for (let i = 0; i < 10; i++) {
-                const next = this.allPoints.pop();
-                if (next) this.visiblePoints.push(next);
-                else break;
-            }
+            const next = this.allPoints.pop();
+            if (!next) break;
 
-            if (this.getLastVisibleX() < targetX) {
-                await new Promise(r => requestAnimationFrame(r));
+            this.visiblePoints.push(next);
+
+            // ⛔ ограничение по времени
+            if (performance.now() - start > timeBudgetMs) {
+                break;
             }
         }
-
-        this.fillingInProgress = false;
     }
 
     cleanup() {
@@ -65,7 +61,13 @@ export class CurveManager {
     }
 
     getRenderablePoints(): Vec2[] {
-        return this.visiblePoints.slice(this.headIndex);
+        const result: Vec2[] = [];
+
+        for (let i = this.headIndex; i < this.visiblePoints.length; i++) {
+            result.push(this.visiblePoints[i]);
+        }
+
+        return result;
     }
 
     getScrollOffset(): number {
