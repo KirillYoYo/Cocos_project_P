@@ -1,7 +1,6 @@
 import {
     _decorator, Component, Node, view, UITransform, Graphics,
-    Sprite, SpriteFrame,
-    Vec2, Color
+    Sprite, SpriteFrame
 } from 'cc';
 
 import { GameState } from '../Core/Models/GameState';
@@ -11,6 +10,11 @@ import { PlaneController } from './PlaneController';
 import { generateCurveVertices } from '../Core/Generation/GeneratedPoints';
 import { GAME_CONFIG } from './GAME_CONFIG';
 import { CurveManager } from '../Core/Curve/CurveManager';
+import { SpaceManager } from '../Core/Space/SpaceObjects';
+
+// 🆕 рендереры
+import { SpaceRenderer } from '../Core/Space/SpaceRenders';
+import { CurveRenderer } from '../Core/Curve/CurveRenders';
 
 const { ccclass, property } = _decorator;
 
@@ -27,6 +31,10 @@ export class GameController extends Component {
     private graphics: Graphics | null = null;
 
     private curve: CurveManager | null = null;
+    private spaceManager: SpaceManager | null = null;
+
+    private spaceRenderer: SpaceRenderer | null = null;
+    private curveRenderer: CurveRenderer | null = null;
 
     private scrollSpeed: number = GAME_CONFIG.speed;
 
@@ -46,6 +54,7 @@ export class GameController extends Component {
         this.levelConfig = LevelRegistry.getConfig(1);
         this.gameState.isRunning = true;
 
+        // 🌊 CURVE
         this.curve = new CurveManager(this.screenWidth, this.screenHeight);
 
         this.curve.init(
@@ -60,12 +69,34 @@ export class GameController extends Component {
 
         this.curve.fillVisiblePointsStep(1.5);
 
+        // ✈️ PLANE
         this.createPlaneNode();
+
+        // 🌌 SPACE
+        this.spaceManager = new SpaceManager(
+            this.screenWidth,
+            this.screenHeight
+        );
+        this.spaceManager.init();
+
+        // 🎨 RENDERERS
+        this.spaceRenderer = new SpaceRenderer(
+            this.graphics!,
+            this.screenWidth,
+            this.screenHeight
+        );
+
+        this.curveRenderer = new CurveRenderer(
+            this.graphics!,
+            this.screenWidth,
+            this.screenHeight
+        );
     }
 
     update(dt: number): void {
         if (!this.gameState.isRunning || this.gameState.isPaused || !this.curve) return;
 
+        // 🌊 обновление кривой
         this.curve.update(dt, this.scrollSpeed);
 
         const now = performance.now() / 1000;
@@ -76,35 +107,25 @@ export class GameController extends Component {
 
         this.curve.fillVisiblePointsStep(1.5);
 
+        // ✈️ позиция самолёта
         const targetY = this.curve.getYAtCenter();
         if (targetY !== null && this.planeController) {
             this.planeController.setPositionY(targetY);
         }
 
-        this.drawPoints();
+        // 🌌 обновление космоса
+        this.spaceManager?.update(dt, 200);
+
+        // 🎨 DRAW
+        this.graphics!.clear();
+
+        this.spaceRenderer?.draw(this.spaceManager!);
+        this.curveRenderer?.draw(this.curve);
     }
 
-    private drawPoints() {
-        if (!this.graphics || !this.curve) return;
-
-        const centerX = this.screenWidth / 2;
-        const centerY = this.screenHeight / 2;
-
-        this.graphics.clear();
-
-        this.curve.forEachRenderablePoint((screenX, y) => {
-            if (screenX >= -50 && screenX <= this.screenWidth + 50) {
-                const localX = screenX - centerX;
-                const localY = y - centerY;
-
-                this.graphics!.circle(localX, localY, 8);
-            }
-        });
-
-        this.graphics.fillColor = new Color(255, 100, 100, 255);
-        this.graphics.fill();
-    }
-
+    // =========================
+    // 🛠 UTILS
+    // =========================
     private createGraphicsNode() {
         const node = new Node('GraphicsNode');
         this.node.addChild(node);
@@ -112,9 +133,6 @@ export class GameController extends Component {
         this.graphics = node.addComponent(Graphics);
     }
 
-    //
-    // PLANE
-    //
     private createPlaneNode(): void {
         if (!this.levelConfig) return;
 
