@@ -1,13 +1,12 @@
 import { Vec2 } from 'cc';
 
 export class CurveManager {
+
     private allPoints: Vec2[] = [];
     private visiblePoints: Vec2[] = [];
 
     private headIndex: number = 0;
     private scrollOffset: number = 0;
-
-    private fillingInProgress = false;
 
     constructor(
         private screenWidth: number,
@@ -24,7 +23,7 @@ export class CurveManager {
     update(dt: number, scrollSpeed: number) {
         this.scrollOffset += scrollSpeed * dt;
 
-        // удаление слева
+        // удаление слева (логический сдвиг)
         while (this.headIndex < this.visiblePoints.length) {
             const screenX = this.visiblePoints[this.headIndex].x - this.scrollOffset;
             if (screenX < -100) {
@@ -43,15 +42,13 @@ export class CurveManager {
 
             this.visiblePoints.push(next);
 
-            // ⛔ ограничение по времени
-            if (performance.now() - start > timeBudgetMs) {
-                break;
-            }
+            if (performance.now() - start > timeBudgetMs) break;
         }
     }
 
     cleanup() {
         const active: Vec2[] = [];
+
         for (let i = this.headIndex; i < this.visiblePoints.length; i++) {
             active.push(this.visiblePoints[i]);
         }
@@ -60,54 +57,55 @@ export class CurveManager {
         this.headIndex = 0;
     }
 
-    getRenderablePoints(): Vec2[] {
-        const result: Vec2[] = [];
-
+    // 🔥 НОВОЕ — полностью скрываем внутренности
+    forEachRenderablePoint(callback: (screenX: number, y: number) => void) {
         for (let i = this.headIndex; i < this.visiblePoints.length; i++) {
-            result.push(this.visiblePoints[i]);
+            const p = this.visiblePoints[i];
+            const screenX = p.x - this.scrollOffset;
+            callback(screenX, p.y);
         }
-
-        return result;
     }
 
-    getScrollOffset(): number {
-        return this.scrollOffset;
+    getYAtCenter(): number | null {
+        if (this.visiblePoints.length - this.headIndex < 2) return null;
+
+        const centerX = this.screenWidth / 2;
+
+        let i = this.headIndex;
+
+        while (
+            i + 1 < this.visiblePoints.length &&
+            this.visiblePoints[i + 1].x - this.scrollOffset < centerX
+        ) {
+            i++;
+        }
+
+        if (i + 1 >= this.visiblePoints.length) {
+            i = this.visiblePoints.length - 2;
+        }
+
+        const p1 = this.visiblePoints[i];
+        const p2 = this.visiblePoints[i + 1];
+
+        const x1 = p1.x - this.scrollOffset;
+        const x2 = p2.x - this.scrollOffset;
+
+        const dx = x2 - x1;
+        if (dx === 0) return p1.y - this.screenHeight / 2;
+
+        const t = (centerX - x1) / dx;
+
+        const p0 = i > this.headIndex ? this.visiblePoints[i - 1] : p1;
+        const p3 = i + 2 < this.visiblePoints.length ? this.visiblePoints[i + 2] : p2;
+
+        const y = this.catmullRom(p0.y, p1.y, p2.y, p3.y, t);
+
+        return y - this.screenHeight / 2;
     }
 
     private getLastVisibleX(): number {
         if (this.visiblePoints.length === 0) return 0;
         return this.visiblePoints[this.visiblePoints.length - 1].x;
-    }
-
-    // --- Y на центре экрана ---
-    getYAtCenter(): number | null {
-        const points = this.getRenderablePoints().map(
-            p => new Vec2(p.x - this.scrollOffset, p.y)
-        );
-
-        if (points.length < 2) return null;
-
-        const centerX = this.screenWidth / 2;
-
-        let i = 0;
-        while (i + 1 < points.length && points[i + 1].x < centerX) i++;
-
-        if (i + 1 >= points.length) i = points.length - 2;
-        if (i < 0) i = 0;
-
-        const p1 = points[i];
-        const p2 = points[i + 1];
-
-        const dx = p2.x - p1.x;
-        if (dx === 0) return p1.y - this.screenHeight / 2;
-
-        const t = (centerX - p1.x) / dx;
-
-        const p0 = i > 0 ? points[i - 1] : p1;
-        const p3 = i + 2 < points.length ? points[i + 2] : p2;
-
-        const y = this.catmullRom(p0.y, p1.y, p2.y, p3.y, t);
-        return y - this.screenHeight / 2;
     }
 
     private catmullRom(p0: number, p1: number, p2: number, p3: number, t: number): number {
